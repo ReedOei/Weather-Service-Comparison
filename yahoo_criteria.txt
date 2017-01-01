@@ -1,0 +1,1 @@
+filter; ['Precipitation: (\d+)', 'span class="low.*?<!-- react-text: .*? -->(\d+)', 'span class="high.*?<!-- react-text: .*? -->(\d+)']

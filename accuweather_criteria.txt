@@ -1,0 +1,1 @@
+filter; ['lo calendar-list-cl-tr cl hv.*?<td>(\d+)', 'lo calendar-list-cl-tr cl hv.*?<td>\d+&#176;.*?(\d+)']
