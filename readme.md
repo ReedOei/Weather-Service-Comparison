@@ -1,26 +1,32 @@
-Installation Instructions:
+#Installation Instructions
 
 First, install pip.
 
 You should be able to do this by running:
 
+```
 python get-pip.py
+```
 
 Then, install both matplotlib and numpy as follows:
 
+```
 pip install matplotlib
 pip install numpy
+```
 
-You should be able to run the main program (in collect_data.py) now, which is in Weather.zip (along with a whole bunch of data).
+You should be able to run the main program (in collect_data.py) now.
 
 Generally speaking, you don't need to touch collect_data.py as far as graphing goes, even though you can, because that's what all the bash scripts are for.
 If you don't want to read the documentation for the dump command, just don't, and skip to the bash script documentation.
 Instead, collect_data.py is only really used for gathering/aggregating data.
 
-Documentation for collect_data.py:
+#Documentation for collect_data.py:
 As all commands are used as follows
 
+```
 python collect_data.py COMMAND_NAME option=value option2=value2
+```
 
 Therefore, the "python collect_data.py" will be omitted.
 Parameters ending in an '=' are options, meaning you must supply a value.
