@@ -1,3 +1,5 @@
+cd ..
+
 if [ -z "$2" ]; then
     ANALYZE_DIR="./analyze/daily/"
 else

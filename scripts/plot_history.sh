@@ -1,3 +1,5 @@
+cd ..
+
 DATE="$1"
 
 if [ -z "$2" ]; then

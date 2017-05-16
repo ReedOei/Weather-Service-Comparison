@@ -17,12 +17,22 @@ import sys
 import time
 import urllib2
 
-# Yeah this is a file you can't see for obvious reasons
+import mysql.connector
+
+# This import is file you can't see for obvious reasons.
 # If you want the program to work, you need:
 # OPENWEATHERMAP_API_KEY
 # WUNDERGROUND_API_KEY
 # DARK_SKY_API_KEY
-from APIKEYS import *
+# mysql_user_name
+# mysql_password
+# mysql_host
+# mysql_database
+from secrets import *
+
+con = mysql.connector.connect(user=mysql_user_name, password=mysql_password,
+                              host=mysql_host, database=mysql_database)
+cursor = con.cursor()
 
 darksky = {}
 darksky['southbend,us'] = '41.66394,-86.22028'
@@ -36,8 +46,8 @@ accuweather['southbend,us'] = 'http://www.accuweather.com/en/us/south-bend-in/46
 wunderground = {}
 wunderground['southbend,us'] = 'IN/South_Bend'
 
-YAHOO_FILTER = 'yahoo_criteria.txt'
-ACCUWEATHER_FILTER = 'accuweather_criteria.txt'
+YAHOO_FILTER = 'criteria/yahoo_criteria.txt'
+ACCUWEATHER_FILTER = 'criteria/accuweather_criteria.txt'
 
 COLORS = ['r', 'b', 'g', 'c', 'm', 'k']
 
@@ -66,6 +76,13 @@ class WeatherData:
         data['humidity'] = self.humidity
 
         return data
+        
+    def insert_sql(self, location, service_name):
+        cursor.callproc('main.usp_WeatherDataInsert', (location, service_name, self.time, self.timestamp, 
+                                                       self.temp, self.is_precip,
+                                                       self.wind, self.precip_type,
+                                                       self.wind_bearing, self.humidity))
+        con.commit()
 
     def __repr__(self):
         return str(self.get_dict())
@@ -94,6 +111,15 @@ class HourlyForecastData:
         data['precip_type'] = self.precip_type
 
         return data
+        
+    def insert_sql(self, location, service_name):
+        dtFcastTime = datetime.datetime.utcfromtimestamp(self.forecasted_time)
+        cursor.callproc('main.usp_WeatherForecastHourlyInsert', (location, service_name, dtFcast, self.forecasted_time, 
+                                                                 self.time, self.timestamp,
+                                                                 self.temp, self.wind,
+                                                                 self.wind_bearing, self.humidity,
+                                                                 self.precip_chance, self.precip_type))
+        con.commit()
 
     def __repr__(self):
         return str(self.get_dict())
@@ -126,6 +152,16 @@ class ForecastData:
         data['precip_type'] = self.precip_type
 
         return data
+        
+    def insert_sql(self, location, service_name):
+        dtFcastTime = datetime.datetime.utcfromtimestamp(data['forecasted_time'])
+        cursor.callproc('main.usp_WeatherForecastDailyInsert', (location, service_name, dtFcastTime, self.forecasted_time,
+                                                                self.time, self.timestamp,
+                                                                self.temp_max, self.temp_avg,
+                                                                self.temp_min, self.wind,
+                                                                self.wind_bearing, self.humidity,
+                                                                self.precip_chance, self.precip_type))
+        con.commit()
 
     def __repr__(self):
         return str(self.get_dict())
@@ -314,6 +350,50 @@ def handle_format(forecast, fname):
             # print('Rounded from {} to {}.'.format(datetime.datetime.utcfromtimestamp(original), datetime.datetime.utcfromtimestamp(fcast['time'])))
 
     return forecast
+    
+def do_aggregatesql(service_name, data):
+    forecast = ast.literal_eval(data)
+    forecast = handle_format(forecast, fname)
+
+    # Make sure we actually have the right data
+    if 'currently' in forecast and 'temperature' in forecast['currently']:
+        new_data = WeatherData(forecast['currently'])
+        new_data.insert_sql(service_name)
+
+    if 'hourly' in forecast:
+        for fcast in forecast['hourly']['data']:
+            new_forecast = HourlyForecastData(forecast['currently']['time'], fcast)
+            # We don't care about forecasts made the day of
+            if new_forecast.forecasted_time < new_forecast.timestamp:
+                new_forecast.insert_sql(service_name)
+
+    for fcast in forecast['daily']['data']:
+        new_forecast = ForecastData(forecast['currently']['time'], fcast)
+        # We don't care about forecasts made the day of
+        if new_forecast.forecasted_time < new_forecast.timestamp:
+            new_forecast.insert_sql(service_name)
+
+def aggregatesql(dir_name, analyze_dir, f_re=None):
+    daily_data = {}
+    hourly_data = {}
+    weather_data = {}
+
+    i = 0
+    total_files = utility.count_files(dir_name, f_re=f_re)
+    for folder in utility.get_directories(dir_name):
+        for fname in utility.get_files(folder, search_re=f_re):
+            utility.show_bar(i, total_files, message='Aggregate ({} of {}): '.format(i, total_files))
+            i += 1
+            # Ignore hidden files like this
+            if fname.split('/')[-1].startswith('.'):
+                continue
+
+            with open(fname, 'r') as f:
+                contents = f.read()
+                
+            do_aggregatesql(fname.split('-')[-1], contents)
+
+    print('')
 
 def aggregate(dir_name, analyze_dir, f_re=None):
     daily_data = {}
@@ -339,7 +419,6 @@ def aggregate(dir_name, analyze_dir, f_re=None):
             # Make sure we actually have the right data
             if 'currently' in forecast and 'temperature' in forecast['currently']:
                 new_data = WeatherData(forecast['currently'])
-
                 if not str(new_data.time.date()) in weather_data:
                     weather_data[str(new_data.time.date())] = []
 
@@ -408,6 +487,56 @@ def aggregate(dir_name, analyze_dir, f_re=None):
                 f.write(str(daily_data[date]))
 
     print('')
+    
+def monitorsql(locations, dir_name, freq, times=-1):
+    i = 0
+    while i != times:
+        start_time = time.time()
+        try:
+            for (service, location) in locations.iteritems():
+                now = datetime.datetime.now()
+
+                try:
+                    os.mkdir(dir_name + str(now.date()) + '/')
+                except:
+                    pass
+
+                if service == 'darksky':
+                    print('Getting data from Dark Sky for {}: {}'.format(location, format_date(now)))
+                    forecast = get_darksky_forecast(darksky[location])
+                    do_aggregatesql('darksky', str(forecast))
+                elif service == 'yahoo':
+                    print('Getting data from Yahoo for {}: {}'.format(location, format_date(now)))
+                    forecast = get_yahoo_forecast(yahoo[location])
+                    do_aggregatesql('yahoo', str(forecast))
+                elif service == 'accuweather':
+                    print('Getting data from Accuweather for {}: {}'.format(location, format_date(now)))
+                    forecast = get_accuweather_forecast(accuweather[location])
+                    do_aggregatesql('accuweather', str(forecast))
+                elif service == 'wunderground':
+                    print('Getting data from Weather Underground for {}: {}'.format(location, format_date(now)))
+                    forecast = get_wunderground_forecast(location)
+                    do_aggregatesql('wunderground', str(forecast))
+                elif service == 'openweathermap':
+                    print('Getting data from OpenWeatherMap for {}: {}'.format(location, format_date(now)))
+                    forecast = get_openweathermap_forecast(location)
+                    do_aggregatesql('openweathermap', str(forecast))
+
+        except Exception as e:
+            print('-------------------------------')
+            print('Failed!')
+            print(e)
+            print('-------------------------------')
+        i += 1
+        if i == times:
+            break
+        time_left = freq - (time.time() - start_time)
+        while time_left > 0:
+            time_left = freq - (time.time() - start_time)
+            time.sleep(1)
+            sys.stdout.write('\r{} seconds until data is taken.'.format(time_left))
+            sys.stdout.flush()
+        print('')
 
 def monitor(locations, dir_name, freq, times=-1):
     i = 0
@@ -596,7 +725,7 @@ def precip_accuracy(data):
         x = d.pop(0)
         y = 0
         for i in d:
-            if i == 1.0:
+            if i > 0.99:
                 y = 1
                 break
 
@@ -636,7 +765,6 @@ def plot_values(res, xvar, yvar, min_var, max_var, show_actual, graph_type, xmin
     max_ranges = []
     actual_maxes = {}
     out_of_range = []
-
     for ci, (vs, yv) in enumerate(zip(res, yvar)):
         if show_actual or o == None:
             print('Plotting var: {}'.format(yv))
@@ -670,7 +798,7 @@ def plot_values(res, xvar, yvar, min_var, max_var, show_actual, graph_type, xmin
 
             if show_actual or o == None:
                 print('Finished getting max_var values.')
-        else:
+        elif not yv in [min_var, max_var] and (min_var != None or max_var != None):
             rep_data = []
 
             while len(vs) > 0:
@@ -749,7 +877,6 @@ def plot_values(res, xvar, yvar, min_var, max_var, show_actual, graph_type, xmin
                     cur, total = data[v]
                     data[v] = (cur + y, total + 1)
 
-            print(vs)
             print(data)
 
             xs = []
@@ -959,6 +1086,15 @@ def command_line(args):
                 contents = f.read()
             locations = ast.literal_eval(contents)
             monitor(locations, dir_name, freq, times=times)
+    elif 'monitorsql' in args:
+        if fname == None:
+            print('Need a file that contains the list of locations to get data for.')
+            return
+        else:
+            with open(fname, 'r') as f:
+                contents = f.read()
+            locations = ast.literal_eval(contents)
+            monitorsql(locations, dir_name, freq, times=times)
     elif 'dump' in args:
         if 'yvar' in args:
             analyze_dir = args.get('analyze_dir', None)
@@ -1034,6 +1170,11 @@ def command_line(args):
         f_re = args.get('re', None)
 
         aggregate(dir_name, analyze_dir, f_re=f_re)
+    elif 'aggregatesql' in args:
+        analyze_dir = args.get('analyze_dir', './analyze/')
+        f_re = args.get('re', None)
+
+        aggregatesql(dir_name, analyze_dir, f_re=f_re)
     elif 'forecast' in args:
         if city == None and latlon == None:
             print('Neither the city nor the zip code were entered, cannot get weather data.')
@@ -1056,3 +1197,5 @@ if __name__ == '__main__':
     arg_synonyms['min_var'] = 'minvar'
 
     command_line(utility.command_line_args(arg_synonyms=arg_synonyms))
+    
+    con.close()

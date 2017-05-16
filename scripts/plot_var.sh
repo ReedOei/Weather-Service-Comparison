@@ -1,3 +1,5 @@
+cd ..
+
 if [ -z "$1" ]; then
     VAR="precip_chance"
 else
