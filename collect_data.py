@@ -17,7 +17,7 @@ import sys
 import time
 import urllib2
 
-import mysql.connector
+import MySQLdb
 
 # This import is file you can't see for obvious reasons.
 # If you want the program to work, you need:
@@ -29,10 +29,6 @@ import mysql.connector
 # mysql_host
 # mysql_database
 from secrets import *
-
-con = mysql.connector.connect(user=mysql_user_name, password=mysql_password,
-                              host=mysql_host, database=mysql_database)
-cursor = con.cursor()
 
 darksky = {}
 darksky['southbend,us'] = '41.66394,-86.22028'
@@ -50,6 +46,14 @@ YAHOO_FILTER = 'criteria/yahoo_criteria.txt'
 ACCUWEATHER_FILTER = 'criteria/accuweather_criteria.txt'
 
 COLORS = ['r', 'b', 'g', 'c', 'm', 'k']
+
+def execute_query(proc_name, params):
+    con = MySQLdb.connect(user=mysql_user_name, passwd=mysql_password,
+                                  host=mysql_host, db=mysql_database)
+    cursor = con.cursor()
+    cursor.callproc(proc_name, params)
+    cursor.close()
+    con.close()
 
 class WeatherData:
     def __init__(self, currently):
@@ -78,48 +82,15 @@ class WeatherData:
         return data
 
     def insert_sql(self, location, service_name):
-        cursor.callproc('main.usp_WeatherDataInsert', (location, service_name, self.time,
-                                                       self.temp, self.is_precip,
-                                                       self.wind, self.precip_type,
-                                                       self.wind_bearing, self.humidity))
-        con.commit()
-
-    def __repr__(self):
-        return str(self.get_dict())
-
-class HourlyForecastData:
-    def __init__(self, forecasted_time, hourly):
-        self.forecasted_time = forecasted_time
-        self.timestamp = hourly['time']
-        self.time = datetime.datetime.utcfromtimestamp(hourly['time'])
-        self.temp = hourly['temperature']
-        self.precip_chance = hourly['precipProbability']
-        self.precip_type = hourly.get('precipType', None)
-        self.wind = hourly['windSpeed']
-        self.wind_bearing = hourly['windBearing']
-        self.humidity = hourly['humidity']
-
-    def get_dict(self):
-        data = {}
-        data['forecasted_time'] = self.forecasted_time
-        data['timestamp'] = self.timestamp
-        data['temp'] = self.temp
-        data['wind'] = self.wind
-        data['wind_bearing'] = self.wind_bearing
-        data['humidity'] = self.humidity
-        data['precip_chance'] = self.precip_chance
-        data['precip_type'] = self.precip_type
-
-        return data
-
-    def insert_sql(self, location, service_name):
-        dtFcastTime = datetime.datetime.utcfromtimestamp(self.forecasted_time)
-        cursor.callproc('main.usp_WeatherForecastHourlyInsert', (location, service_name, dtFcastTime,
-                                                                 self.time,
-                                                                 self.temp, self.wind,
-                                                                 self.wind_bearing, self.humidity,
-                                                                 self.precip_chance, self.precip_type))
-        con.commit()
+        execute_query('usp_WeatherDataInsert', (self.time,
+                                                       self.temp,
+                                                       self.is_precip,
+                                                       self.precip_type,
+                                                       self.wind,
+                                                       self.wind_bearing,
+                                                       self.humidity,
+                                                       1,
+                                                       service_name))
 
     def __repr__(self):
         return str(self.get_dict())
@@ -155,13 +126,17 @@ class ForecastData:
 
     def insert_sql(self, location, service_name):
         dtFcastTime = datetime.datetime.utcfromtimestamp(self.forecasted_time)
-        cursor.callproc('main.usp_WeatherForecastDailyInsert', (location, service_name, dtFcastTime,
-                                                                self.time,
-                                                                self.temp_max, self.temp_avg,
-                                                                self.temp_min, self.wind,
-                                                                self.wind_bearing, self.humidity,
-                                                                self.precip_chance, self.precip_type))
-        con.commit()
+        execute_query('usp_WeatherForecastDailyInsert', (dtFcastTime,
+                                                            self.time,
+                                                            self.temp_max,
+                                                            self.temp_min,
+                                                            self.precip_chance,
+                                                            self.precip_type,
+                                                            self.wind,
+                                                            self.wind_bearing,
+                                                            self.humidity,
+                                                            1,
+                                                            service_name))
 
     def __repr__(self):
         return str(self.get_dict())
@@ -360,16 +335,9 @@ def do_aggregatesql(location, service_name, data):
         new_data = WeatherData(forecast['currently'])
         new_data.insert_sql(location, service_name)
 
-    if 'hourly' in forecast:
-        for fcast in forecast['hourly']['data']:
-            new_forecast = HourlyForecastData(forecast['currently']['time'], fcast)
-            # We don't care about forecasts made the day of
-            if new_forecast.forecasted_time < new_forecast.timestamp:
-                new_forecast.insert_sql(location, service_name)
-
     for fcast in forecast['daily']['data']:
         new_forecast = ForecastData(forecast['currently']['time'], fcast)
-        # We don't care about forecasts made the day of
+        # We don't care about forecasts made the day of (or after, hypothetically)
         if new_forecast.forecasted_time < new_forecast.timestamp:
             new_forecast.insert_sql(location, service_name)
 
@@ -458,16 +426,7 @@ def command_line(args):
     if latlon != None:
         latlon = cities[latlon.lower().replace(' ','')]
 
-    if 'monitor' in args:
-        if fname == None:
-            print('Need a file that contains the list of locations to get data for.')
-            return
-        else:
-            with open(fname, 'r') as f:
-                contents = f.read()
-            locations = ast.literal_eval(contents)
-            monitor(locations, dir_name, freq, times=times)
-    elif 'monitorsql' in args:
+    if 'monitorsql' in args or 'monitor' in args:
         if fname == None:
             print('Need a file that contains the list of locations to get data for.')
             return
@@ -503,5 +462,3 @@ if __name__ == '__main__':
     arg_synonyms['min_var'] = 'minvar'
 
     command_line(utility.command_line_args(arg_synonyms=arg_synonyms))
-
-    con.close()
