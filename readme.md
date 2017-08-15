@@ -11,8 +11,6 @@ pip install numpy
 
 You should be able to run the main program (in collect_data.py) now.
 
-Instead, collect_data.py is only really used for gathering/aggregating data.
-
 # Documentation for collect_data.py:
 As all commands are used as follows
 
