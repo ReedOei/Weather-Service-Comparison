@@ -423,7 +423,6 @@ def monitorsql(locations, dir_name, freq, times=-1):
                     print('Getting data from OpenWeatherMap for {}: {}'.format(location, format_date(now)))
                     forecast = get_openweathermap_forecast(location)
                     do_aggregatesql(location, 'openweathermap', str(forecast))
-
         except Exception as e:
             print('-------------------------------')
             print('Failed!')
