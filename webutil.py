@@ -317,3 +317,4 @@ def follow_links(url, f, link_pattern=None, link_text_pattern=None, link_prefix=
 
 if __name__ == '__main__':
     command_line(utility.command_line_args(sys.argv))
+

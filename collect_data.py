@@ -30,30 +30,57 @@ import MySQLdb
 # mysql_database
 from secrets import *
 
-darksky = {}
-darksky['southbend,us'] = '41.66394,-86.22028'
-
 yahoo = {}
 yahoo['southbend,us'] = 'https://www.yahoo.com/news/weather/united-states/indiana/south-bend-12777829'
-
-accuweather = {}
-accuweather['southbend,us'] = 'http://www.accuweather.com/en/us/south-bend-in/46617/month/20075_pc?view=table'
-
-wunderground = {}
-wunderground['southbend,us'] = 'IN/South_Bend'
 
 YAHOO_FILTER = 'criteria/yahoo_criteria.txt'
 ACCUWEATHER_FILTER = 'criteria/accuweather_criteria.txt'
 
 COLORS = ['r', 'b', 'g', 'c', 'm', 'k']
 
-def execute_query(proc_name, params):
+def do_non_query(proc_name, params):
     con = MySQLdb.connect(user=mysql_user_name, passwd=mysql_password,
                                   host=mysql_host, db=mysql_database)
     cursor = con.cursor()
     cursor.callproc(proc_name, params)
     cursor.close()
     con.close()
+
+def execute_query(proc_name, params):
+    connection = MySQLdb.connect(user=mysql_user_name, passwd=mysql_password,
+                                  host=mysql_host, db=mysql_database,
+                                  port=3306)
+
+    res = None
+    with connection.cursor() as cursor:
+        cursor.callproc(proc_name, params)
+        raw = cursor.fetchall()
+        column_names = map(lambda col: col[0], cursor.description)
+
+        res = []
+        for row in raw:
+            res.append({col_name: val for col_name, val in zip(column_names, row)})
+    
+    cursor.close()
+    connection.close()
+
+    return res
+
+def get_service_code(service, place):
+    data = execute_query("usp_WeatherLocationInfoGet", [place])[0]
+
+    if service == 'darksky':
+        return '{},{}'.format(data['latitude'], data['longitude'])
+    elif service == 'accuweather':
+        url = 'http://www.accuweather.com/en/{}/{}-{}/{}/month/20075_pc?view=table'
+        
+        url = url.format(data['country_name_short'], data['name'].lower().replace(' ', '-'), data['state_name_short'], data['zip_code'])
+        
+        return url
+    elif service == 'wunderground':
+        return '{}/{}'.format(data['state_name_short'].upper(), data['name'].replace(' ', '_'))
+
+    return None 
 
 class WeatherData:
     def __init__(self, currently):
@@ -82,7 +109,7 @@ class WeatherData:
         return data
 
     def insert_sql(self, location, service_name):
-        execute_query('usp_WeatherDataInsert', (self.time,
+        do_non_query('usp_WeatherDataInsert', (self.time,
                                                        self.temp,
                                                        self.is_precip,
                                                        self.precip_type,
@@ -126,7 +153,7 @@ class ForecastData:
 
     def insert_sql(self, location, service_name):
         dtFcastTime = datetime.datetime.utcfromtimestamp(self.forecasted_time)
-        execute_query('usp_WeatherForecastDailyInsert', (dtFcastTime,
+        do_non_query('usp_WeatherForecastDailyInsert', (dtFcastTime,
                                                             self.time,
                                                             self.temp_max,
                                                             self.temp_min,
@@ -263,7 +290,7 @@ def get_openweathermap_forecast(loc):
     return res
 
 def get_wunderground_forecast(loc):
-    loc = wunderground[loc]
+    loc = get_service_code('wunderground', loc)
     data = get_json('http://api.wunderground.com/api/{}/forecast10day/q/{}.json'.format(WUNDERGROUND_API_KEY,loc))
 
     now = datetime.datetime.now()
@@ -368,7 +395,7 @@ def monitorsql(locations, dir_name, freq, times=-1):
     while i != times:
         start_time = time.time()
         try:
-            for (service, location) in locations.iteritems():
+            for (service, location) in locations:
                 now = datetime.datetime.now()
 
                 try:
@@ -378,15 +405,15 @@ def monitorsql(locations, dir_name, freq, times=-1):
 
                 if service == 'darksky':
                     print('Getting data from Dark Sky for {}: {}'.format(location, format_date(now)))
-                    forecast = get_darksky_forecast(darksky[location])
+                    forecast = get_darksky_forecast(get_service_code('darksky', location))
                     do_aggregatesql(location, 'darksky', str(forecast))
-                elif service == 'yahoo':
+                elif service == 'yahoo' and location in yahoo: # Yahoo is all weird with the WOEIDs so let's just ignore them for now.
                     print('Getting data from Yahoo for {}: {}'.format(location, format_date(now)))
                     forecast = get_yahoo_forecast(yahoo[location])
                     do_aggregatesql(location, 'yahoo', str(forecast))
                 elif service == 'accuweather':
                     print('Getting data from Accuweather for {}: {}'.format(location, format_date(now)))
-                    forecast = get_accuweather_forecast(accuweather[location])
+                    forecast = get_accuweather_forecast(get_service_code('accuweather', location))
                     do_aggregatesql(location, 'accuweather', str(forecast))
                 elif service == 'wunderground':
                     print('Getting data from Weather Underground for {}: {}'.format(location, format_date(now)))
@@ -462,3 +489,4 @@ if __name__ == '__main__':
     arg_synonyms['min_var'] = 'minvar'
 
     command_line(utility.command_line_args(arg_synonyms=arg_synonyms))
+

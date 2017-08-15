@@ -1,1 +1,7 @@
-{'yahoo': 'southbend,us', 'darksky': 'southbend,us', 'accuweather': 'southbend,us', 'wunderground': 'southbend,us', 'openweathermap': 'southbend,us'}
+[
+    ('yahoo', 'southbend,us'),
+    ('darksky', 'southbend,us'),
+    ('accuweather', 'southbend,us'),
+    ('wunderground', 'southbend,us'),
+    ('openweathermap', 'southbend,us')
+]
