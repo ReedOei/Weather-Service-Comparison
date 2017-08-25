@@ -31,7 +31,7 @@ import MySQLdb
 from secrets import *
 
 yahoo = {}
-yahoo['southbend,us'] = 'https://www.yahoo.com/news/weather/united-states/indiana/south-bend-12777829'
+yahoo['SouthBend,US'] = 'https://www.yahoo.com/news/weather/united-states/indiana/south-bend-12777829'
 
 YAHOO_FILTER = 'criteria/yahoo_criteria.txt'
 ACCUWEATHER_FILTER = 'criteria/accuweather_criteria.txt'
@@ -453,14 +453,14 @@ def command_line(args):
         latlon = cities[latlon.lower().replace(' ','')]
 
     if 'monitorsql' in args or 'monitor' in args:
-        if fname == None:
-            print('Need a file that contains the list of locations to get data for.')
-            return
-        else:
-            with open(fname, 'r') as f:
-                contents = f.read()
-            locations = ast.literal_eval(contents)
-            monitorsql(locations, dir_name, freq, times=times)
+        results = execute_query('usp_WeatherLocationsGet', [])
+
+        locations = []
+
+        for row in results:
+            locations.append((row['service'], row['location_code']))
+
+        monitorsql(locations, dir_name, freq, times=times)
     elif 'aggregatesql' in args:
         analyze_dir = args.get('analyze_dir', './analyze/')
         f_re = args.get('re', None)
