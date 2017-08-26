@@ -108,16 +108,16 @@ class WeatherData:
 
         return data
 
-    def insert_sql(self, location, service_name):
+    def insert_sql(self, location_id, service_name):
         do_non_query('usp_WeatherDataInsert', (self.time,
-                                                       self.temp,
-                                                       self.is_precip,
-                                                       self.precip_type,
-                                                       self.wind,
-                                                       self.wind_bearing,
-                                                       self.humidity,
-                                                       1,
-                                                       service_name))
+                                               self.temp,
+                                               self.is_precip,
+                                               self.precip_type,
+                                               self.wind,
+                                               self.wind_bearing,
+                                               self.humidity,
+                                               location_id,
+                                               service_name))
 
     def __repr__(self):
         return str(self.get_dict())
@@ -151,7 +151,7 @@ class ForecastData:
 
         return data
 
-    def insert_sql(self, location, service_name):
+    def insert_sql(self, location_id, service_name):
         dtFcastTime = datetime.datetime.utcfromtimestamp(self.forecasted_time)
         do_non_query('usp_WeatherForecastDailyInsert', (dtFcastTime,
                                                             self.time,
@@ -162,7 +162,7 @@ class ForecastData:
                                                             self.wind,
                                                             self.wind_bearing,
                                                             self.humidity,
-                                                            1,
+                                                            location_id,
                                                             service_name))
 
     def __repr__(self):
@@ -353,49 +353,31 @@ def handle_format(forecast, fname):
 
     return forecast
 
-def do_aggregatesql(location, service_name, data):
+def do_aggregatesql(location_data, data):
+    location_id, location, service_name = location_data
+
     forecast = ast.literal_eval(data)
     forecast = handle_format(forecast, service_name)
 
     # Make sure we actually have the right data
     if 'currently' in forecast and 'temperature' in forecast['currently']:
         new_data = WeatherData(forecast['currently'])
-        new_data.insert_sql(location, service_name)
+        new_data.insert_sql(location_id, service_name)
 
     for fcast in forecast['daily']['data']:
         new_forecast = ForecastData(forecast['currently']['time'], fcast)
         # We don't care about forecasts made the day of (or after, hypothetically)
         if new_forecast.forecasted_time < new_forecast.timestamp:
-            new_forecast.insert_sql(location, service_name)
-
-def aggregatesql(dir_name, analyze_dir, f_re=None):
-    daily_data = {}
-    hourly_data = {}
-    weather_data = {}
-
-    i = 0
-    total_files = utility.count_files(dir_name, f_re=f_re)
-    for folder in utility.get_directories(dir_name):
-        for fname in utility.get_files(folder, search_re=f_re):
-            utility.show_bar(i, total_files, message='Aggregate ({} of {}): '.format(i, total_files))
-            i += 1
-            # Ignore hidden files like this
-            if fname.split('/')[-1].startswith('.'):
-                continue
-
-            with open(fname, 'r') as f:
-                contents = f.read()
-
-            do_aggregatesql('southbend,us', fname.split('-')[-1].split('.')[0], contents)
-
-    print('')
+            new_forecast.insert_sql(location_id, service_name)
 
 def monitorsql(locations, dir_name, freq, times=-1):
     i = 0
     while i != times:
         start_time = time.time()
         try:
-            for (service, location) in locations:
+            for location_data in locations:
+                location_id, location, service = location_data
+
                 now = datetime.datetime.now()
 
                 try:
@@ -406,23 +388,23 @@ def monitorsql(locations, dir_name, freq, times=-1):
                 if service == 'darksky':
                     print('Getting data from Dark Sky for {}: {}'.format(location, format_date(now)))
                     forecast = get_darksky_forecast(get_service_code('darksky', location))
-                    do_aggregatesql(location, 'darksky', str(forecast))
-                elif service == 'yahoo' and location in yahoo: # Yahoo is all weird with the WOEIDs so let's just ignore them for now.
+                    do_aggregatesql(location_data, str(forecast))
+                elif service == 'yahoo' and location in yahoo: # Yahoo is all weird with the WOEIDs so we're going to treat them differently for now.
                     print('Getting data from Yahoo for {}: {}'.format(location, format_date(now)))
                     forecast = get_yahoo_forecast(yahoo[location])
-                    do_aggregatesql(location, 'yahoo', str(forecast))
+                    do_aggregatesql(location_data, str(forecast))
                 elif service == 'accuweather':
                     print('Getting data from Accuweather for {}: {}'.format(location, format_date(now)))
                     forecast = get_accuweather_forecast(get_service_code('accuweather', location))
-                    do_aggregatesql(location, 'accuweather', str(forecast))
+                    do_aggregatesql(location_data, str(forecast))
                 elif service == 'wunderground':
                     print('Getting data from Weather Underground for {}: {}'.format(location, format_date(now)))
                     forecast = get_wunderground_forecast(location)
-                    do_aggregatesql(location, 'wunderground', str(forecast))
+                    do_aggregatesql(location_data, str(forecast))
                 elif service == 'openweathermap':
                     print('Getting data from OpenWeatherMap for {}: {}'.format(location, format_date(now)))
                     forecast = get_openweathermap_forecast(location)
-                    do_aggregatesql(location, 'openweathermap', str(forecast))
+                    do_aggregatesql(location_data, str(forecast))
         except Exception as e:
             print('-------------------------------')
             print('Failed!')
@@ -458,14 +440,9 @@ def command_line(args):
         locations = []
 
         for row in results:
-            locations.append((row['service'], row['location_code']))
+            locations.append((row['location_id'], row['location_code'], row['service']))
 
         monitorsql(locations, dir_name, freq, times=times)
-    elif 'aggregatesql' in args:
-        analyze_dir = args.get('analyze_dir', './analyze/')
-        f_re = args.get('re', None)
-
-        aggregatesql(dir_name, analyze_dir, f_re=f_re)
     elif 'forecast' in args:
         if city == None and latlon == None:
             print('Neither the city nor the zip code were entered, cannot get weather data.')
