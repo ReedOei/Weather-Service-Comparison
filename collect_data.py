@@ -60,7 +60,7 @@ def execute_query(proc_name, params):
         res = []
         for row in raw:
             res.append({col_name: val for col_name, val in zip(column_names, row)})
-    
+
     cursor.close()
     connection.close()
 
@@ -73,14 +73,14 @@ def get_service_code(service, place):
         return '{},{}'.format(data['latitude'], data['longitude'])
     elif service == 'accuweather':
         url = 'http://www.accuweather.com/en/{}/{}-{}/{}/month/20075_pc?view=table'
-        
+
         url = url.format(data['country_name_short'], data['name'].lower().replace(' ', '-'), data['state_name_short'], data['zip_code'])
-        
+
         return url
     elif service == 'wunderground':
         return '{}/{}'.format(data['state_name_short'].upper(), data['name'].replace(' ', '_'))
 
-    return None 
+    return None
 
 class WeatherData:
     def __init__(self, currently):
@@ -204,6 +204,7 @@ def get_timestamp(dt):
     return int(timestamp)
 
 def get_accuweather_forecast(url):
+    print(url)
     data = webutil.find_data_on_page(url, webutil.read_filter_file(ACCUWEATHER_FILTER))[0]
     print(data)
 
@@ -262,7 +263,8 @@ def get_yahoo_forecast(url):
     return res
 
 def get_openweathermap_forecast(loc):
-    data = get_json('http://api.openweathermap.org/data/2.5/forecast/daily?appid={}&q={}'.format(OPENWEATHERMAP_API_KEY, loc))
+    url = 'http://api.openweathermap.org/data/2.5/forecast/daily?appid={}&q={}'.format(OPENWEATHERMAP_API_KEY, loc)
+    data = get_json(url)
 
     now = datetime.datetime.now()
     # Round down the time to the closest day and get the timestamp
@@ -394,9 +396,10 @@ def monitorsql(locations, dir_name, freq, times=-1):
                     forecast = get_yahoo_forecast(yahoo[location])
                     do_aggregatesql(location_data, str(forecast))
                 elif service == 'accuweather':
-                    print('Getting data from Accuweather for {}: {}'.format(location, format_date(now)))
-                    forecast = get_accuweather_forecast(get_service_code('accuweather', location))
-                    do_aggregatesql(location_data, str(forecast))
+                    print('Skipping Accuweather for {}: {}'.format(location, format_date(now)))
+                    # print('Getting data from Accuweather for {}: {}'.format(location, format_date(now)))
+                    # forecast = get_accuweather_forecast(get_service_code('accuweather', location))
+                    # do_aggregatesql(location_data, str(forecast))
                 elif service == 'wunderground':
                     print('Getting data from Weather Underground for {}: {}'.format(location, format_date(now)))
                     forecast = get_wunderground_forecast(location)

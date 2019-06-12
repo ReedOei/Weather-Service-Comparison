@@ -63,7 +63,7 @@ def get_page_data(url):
 
         return page_data
     except:
-        return run_command('curl -s "{}"'.format(url))
+        return run_command('curl -k -s "{}"'.format(url))
 
 def get_json(url):
     resource = urllib2.urlopen(url)
